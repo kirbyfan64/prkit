@@ -13,27 +13,24 @@
 #include <unistd.h>
 
 
-#define _PRKIT_MONITOR_SEND_LENGTH \
-  NLMSG_LENGTH(sizeof(struct cn_msg) + sizeof(enum proc_cn_mcast_op))
-#define PRKIT_MONITOR_RECV_LENGTH \
-  NLMSG_LENGTH(sizeof(struct cn_msg) + sizeof(struct proc_event))
-
-
 typedef unsigned long prkit_ulong;
 typedef unsigned long long prkit_ullong;
 
 
-enum prkit_kernel_stat_fields {
+#define PRKIT_COMM_LENGTH 16
+
+
+typedef enum prkit_kernel_stat_fields {
   PRKIT_KERNEL_STAT_CTXT = 1 << 0,
   PRKIT_KERNEL_STAT_BTIME = 1 << 1,
   PRKIT_KERNEL_STAT_PROCESSES = 1 << 2,
   PRKIT_KERNEL_STAT_PROCS_RUNNING = 1 << 3,
   PRKIT_KERNEL_STAT_PROCS_BLOCKED = 1 << 4,
-};
+} prkit_kernel_stat_fields;
 
 
 struct prkit_kernel_stat {
-  enum prkit_kernel_stat_fields fields;
+  prkit_kernel_stat_fields fields;
 
   prkit_ulong ctxt;
   prkit_ulong btime;
@@ -43,7 +40,7 @@ struct prkit_kernel_stat {
 };
 
 
-enum prkit_state {
+typedef enum prkit_state {
   PRKIT_STATE_RUNNING = 'R',
   PRKIT_STATE_SLEEPING = 'S',
   PRKIT_STATE_DISK = 'D',
@@ -51,13 +48,13 @@ enum prkit_state {
   PRKIT_STATE_STOPPED = 'T',
   PRKIT_STATE_TRACING = 't',
   PRKIT_STATE_DEAD = 'X',
-};
+} prkit_state;
 
 
 struct prkit_pid_stat {
   int pid;
-  char comm[16];
-  enum prkit_state state;
+  char comm[PRKIT_COMM_LENGTH];
+  prkit_state state;
   int ppid;
   int pgrp;
   int session;
@@ -140,5 +137,4 @@ prkit_ulong prkit_pid_actual_start_time(const struct prkit_kernel_stat *kstat,
 #define prkit_pid_actual_start_time PRKIT_PID_ACTUAL_START_TIME
 
 int prkit_monitor_open();
-int prkit_monitor_read_event_using_buf(int nlfd, struct proc_event **out_event, char *out_buf);
 int prkit_monitor_read_event(int nlfd, struct proc_event *out_event);

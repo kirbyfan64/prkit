@@ -21,6 +21,12 @@
 #include <string.h>
 
 
+#define PRKIT_MONITOR_SEND_LENGTH \
+  NLMSG_LENGTH(sizeof(struct cn_msg) + sizeof(enum proc_cn_mcast_op))
+#define PRKIT_MONITOR_RECV_LENGTH \
+  NLMSG_LENGTH(sizeof(struct cn_msg) + sizeof(struct proc_event))
+
+
 /* We use getdents64 instead of opendir/readdir because getdents64 allows us to read multiple
    files at once + getdents64 supports directly reading an fd. */
 struct linux_dirent64 {
@@ -509,9 +515,9 @@ int prkit_monitor_open() {
     return -errno;
   }
 
-  char buf[NLMSG_SPACE(_PRKIT_MONITOR_SEND_LENGTH)] = {0};
+  char buf[NLMSG_SPACE(PRKIT_MONITOR_SEND_LENGTH)] = {0};
   struct nlmsghdr *hdr = (struct nlmsghdr *)buf;
-  hdr->nlmsg_len = _PRKIT_MONITOR_SEND_LENGTH;
+  hdr->nlmsg_len = PRKIT_MONITOR_SEND_LENGTH;
   hdr->nlmsg_type = NLMSG_DONE;
   hdr->nlmsg_pid = pid;
 
@@ -531,10 +537,11 @@ int prkit_monitor_open() {
 }
 
 
-int prkit_monitor_read_event_using_buf(int nlfd, struct proc_event **out_event, char *out_buf) {
-  struct nlmsghdr *hdr = (struct nlmsghdr *)out_buf;
+int prkit_monitor_read_event(int nlfd, struct proc_event *out_event) {
+  char buf[NLMSG_SPACE(PRKIT_MONITOR_RECV_LENGTH)];
+  struct nlmsghdr *hdr = (struct nlmsghdr *)buf;
 
-  if (recv(nlfd, out_buf, NLMSG_SPACE(PRKIT_MONITOR_RECV_LENGTH), 0) == -1) {
+  if (recv(nlfd, buf, NLMSG_SPACE(PRKIT_MONITOR_RECV_LENGTH), 0) == -1) {
     return -errno;
   }
 
@@ -542,19 +549,7 @@ int prkit_monitor_read_event_using_buf(int nlfd, struct proc_event **out_event, 
     return 0;
   }
 
-  *out_event = (struct proc_event *)((struct cn_msg *)NLMSG_DATA(hdr))->data;
+  memcpy(out_event, (struct proc_event *)((struct cn_msg *)NLMSG_DATA(hdr))->data,
+         sizeof(*out_event));
   return 1;
-}
-
-
-int prkit_monitor_read_event(int nlfd, struct proc_event *out_event) {
-  char buf[NLMSG_SPACE(PRKIT_MONITOR_RECV_LENGTH)];
-  struct proc_event *stack_event;
-  int r = prkit_monitor_read_event_using_buf(nlfd, &stack_event, buf);
-  if (r <= 0) {
-    return r;
-  }
-
-  memcpy(out_event, stack_event, sizeof(*stack_event));
-  return r;
 }

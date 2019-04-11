@@ -39,24 +39,57 @@ int run() {
       return print_error(nlfd, "prkit_monitor_read_event");
     }
 
-    if (event.what == PROC_EVENT_EXEC) {
+    if (event.what & PROC_EVENT_FORK) {
+      cleanup(closep) int parent_pid = event.event_data.fork.parent_pid;
+      cleanup(closep) int child_pid = event.event_data.fork.child_pid;
+
+      int pids[] = {parent_pid, child_pid};
+      char pid_comms[2][PRKIT_COMM_LENGTH];
+
+      for (int i = 0; i < sizeof(pids) / sizeof(pids[0]); i++) {
+        int pid = pids[i];
+        const char *desc = i == 0 ? "parent" : "child";
+
+        cleanup(closep) int pidfd = prkit_pid_open(procfd, pid);
+        if (pidfd < 0) {
+          print_error(pidfd, "prkit_pid_open(%s %d)", desc, pid);
+          continue;
+        }
+
+        struct prkit_pid_stat pstat;
+        r = prkit_pid_stat(pidfd, &pstat);
+        if (r < 0) {
+          print_error(r, "prkit_pid_stat(%s %d)", desc, pid);
+          continue;
+        }
+
+        memcpy(pid_comms[i], pstat.comm, PRKIT_COMM_LENGTH);
+      }
+
+      printf("%d forked to %d (parent comm = %s, child comm = %s)\n", parent_pid,
+             child_pid, pid_comms[0], pid_comms[1]);
+    }
+
+    if (event.what & PROC_EVENT_EXEC) {
       int pid = event.event_data.exec.process_pid;
 
       int pidfd = prkit_pid_open(procfd, pid);
       if (pidfd < 0) {
-        print_error(pidfd, "prkit_pid_open(%d)", pid);
+        print_error(pidfd, "prkit_pid_open(exec %d)", pid);
         continue;
       }
 
       struct prkit_pid_stat pstat;
       r = prkit_pid_stat(pidfd, &pstat);
       if (r < 0) {
-        print_error(r, "prkit_pid_stat(%d)", pid);
+        print_error(r, "prkit_pid_stat(exec %d)", pid);
         continue;
       }
 
       printf("%d was started (comm = %s)\n", pid, pstat.comm);
-    } else if (event.what == PROC_EVENT_EXIT) {
+    }
+
+    if (event.what & PROC_EVENT_EXIT) {
       int pid = event.event_data.exit.process_pid;
 
       printf("%d died\n", pid);
