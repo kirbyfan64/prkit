@@ -369,21 +369,25 @@ int prkit_pid_environ_strv(int pidfd, char ***out_environ_strv) {
 
 static size_t resolve(int pidfd, const char *path, char **out, size_t len) {
   cleanup(freep) char *allocated = NULL;
-  if (*out == NULL) {
+  char *target = *out;
+  if (target == NULL) {
     len = PATH_MAX + 1;
-    *out = allocated = malloc(len);
+    target = allocated = malloc(len);
     if (allocated == NULL) {
       return -errno;
     }
   }
 
-  ssize_t r = readlinkat(pidfd, path, *out, len - 1);
+  ssize_t r = readlinkat(pidfd, path, target, len - 1);
   if (r == -1) {
     return -errno;
   }
 
-  (*out)[r] = 0;
-  stealp(&allocated);
+  target[r] = 0;
+  if (allocated != NULL) {
+    *out = stealp(&allocated);
+  }
+
   return r;
 }
 
