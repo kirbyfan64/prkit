@@ -21,13 +21,14 @@
 int run() {
   int r;
 
-  cleanup(closep) int procfd = prkit_open();
-  if (procfd < 0) {
-    return print_error(procfd, "prkit_open");
+  cleanup(closep) int procfd = -1;
+  r = prkit_open(&procfd);
+  if (r < 0) {
+    return print_error(r, "prkit_open");
   }
 
   cleanup(freep) char *kcmdline = NULL;
-  r = prkit_kernel_cmdline(procfd, &kcmdline, 0);
+  r = prkit_kernel_cmdline(procfd, &kcmdline, NULL);
   if (r < 0) {
     return print_error(r, "prkit_kernel_cmdline");
   }
@@ -64,20 +65,20 @@ int run() {
   }
 
   cleanup(freep) int *pids = NULL;
-  r = prkit_walk_read_all(procfd, &pids);
+  size_t npids = 0;
+  r = prkit_walk_read_all(procfd, &pids, &npids);
   if (r < 0) {
     return print_error(r, "prkit_walk_read_all");
   }
-
-  int npids = r;
 
   for (int i = 0; i < npids; i++) {
     int pid = pids[i];
     printf("- %d:\n", pid);
 
-    cleanup(closep) int pidfd = prkit_pid_open(procfd, pid);
-    if (pidfd < 0) {
-      print_error(pidfd, "  prkit_pid_open(%d)", pid);
+    cleanup(closep) int pidfd = -1;
+    r = prkit_pid_open(procfd, pid, &pidfd);
+    if (r < 0) {
+      print_error(r, "  prkit_pid_open(%d)", pid);
       continue;
     }
 
@@ -106,7 +107,7 @@ int run() {
     }
 
     cleanup(freep) char *cwd = NULL;
-    r = prkit_pid_resolve_cwd(pidfd, &cwd, 0);
+    r = prkit_pid_resolve_cwd(pidfd, &cwd, NULL);
     if (r < 0) {
       print_error(r, "  prkit_pid_resolve_cwd(%d)", pid);
       continue;
@@ -115,7 +116,7 @@ int run() {
     printf("  - cwd: %s\n", cwd);
 
     cleanup(freep) char *exe = NULL;
-    r = prkit_pid_resolve_exe(pidfd, &exe, 0);
+    r = prkit_pid_resolve_exe(pidfd, &exe, NULL);
     if (r < 0) {
       print_error(r, "  prkit_pid_resolve_exe(%d)", pid);
       continue;

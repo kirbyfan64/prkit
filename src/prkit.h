@@ -106,27 +106,27 @@ struct prkit_pid_stat {
 void prkit_free_strv(char **strv);
 void prkit_free_strvp(char ***strv);
 
-int prkit_open();
+int prkit_open(int *out_fd);
 
-ssize_t prkit_kernel_cmdline(int procfd, char **out_cmdline, size_t len);
+int prkit_kernel_cmdline(int procfd, char **out_cmdline, size_t *out_len);
 int prkit_kernel_stat(int procfd, struct prkit_kernel_stat *out_kstat);
 
 int prkit_walk_reset(int procfd);
-int prkit_walk_read(int procfd, int *out_pids, int count);
-int prkit_walk_read_all(int procfd, int **out_pidsv);
+int prkit_walk_read(int procfd, int *out_pids, size_t *out_count);
+int prkit_walk_read_all(int procfd, int **out_pidsv, size_t *out_count);
 
-int prkit_pid_open(int procfd, int pid);
+int prkit_pid_open(int procfd, int pid, int *out_pidfd);
 
-ssize_t prkit_pid_cmdline(int pidfd, char **out_cmdline, size_t len);
+int prkit_pid_cmdline(int pidfd, char **out_cmdline, size_t *out_len);
 int prkit_pid_cmdline_strv(int pidfd, char ***out_cmdline_strv);
-ssize_t prkit_pid_environ(int pidfd, char **out_environ, size_t len);
+int prkit_pid_environ(int pidfd, char **out_environ, size_t *out_len);
 int prkit_pid_environ_strv(int pidfd, char ***out_environ_strv);
 
-ssize_t prkit_pid_resolve_cwd(int pidfd, char **out_cwd, size_t len);
-ssize_t prkit_pid_resolve_exe(int pidfd, char **out_exe, size_t len);
+int prkit_pid_resolve_cwd(int pidfd, char **out_cwd, size_t *out_len);
+int prkit_pid_resolve_exe(int pidfd, char **out_exe, size_t *out_len);
 
 int prkit_pid_stat_using_buf(int pidfd, struct prkit_pid_stat *out_pstat, char **out_buf,
-                             size_t len);
+                             size_t *out_len);
 int prkit_pid_stat(int pidfd, struct prkit_pid_stat *out_pstat);
 
 prkit_ulong prkit_pid_actual_start_time(const struct prkit_kernel_stat *kstat,

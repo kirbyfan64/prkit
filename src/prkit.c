@@ -54,7 +54,7 @@ static int getdents64(int fd, struct linux_dirent64 *dp, int size) {
 
 
 // Custom getline that won't attempt to realloc *out if it's too small.
-static ssize_t getline_noalloc(int fd, char **out, size_t len) {
+static int getline_noalloc(int fd, char **out, size_t *out_len) {
   char buf[1024];
 
   int requires_alloc = *out == NULL;
@@ -82,7 +82,7 @@ static ssize_t getline_noalloc(int fd, char **out, size_t len) {
       }
 
       allocated = target;
-    } else if (bytes_read + chunk + 1 > len) {
+    } else if (bytes_read + chunk + 1 > *out_len) {
       return -ERANGE;
     }
 
@@ -101,8 +101,11 @@ static ssize_t getline_noalloc(int fd, char **out, size_t len) {
   target[bytes_read] = 0;
   stealp(&allocated);
   *out = target;
+  if (out_len != NULL) {
+    *out_len = bytes_read;
+  }
 
-  return bytes_read;
+  return 0;
 }
 
 
@@ -122,13 +125,14 @@ void prkit_free_strvp(char ***strv) {
 }
 
 
-int prkit_open() {
+int prkit_open(int *out_fd) {
   int fd = openat(-1, "/proc", O_DIRECTORY|O_RDONLY);
   if (fd == -1) {
     return -errno;
   }
 
-  return fd;
+  *out_fd = fd;
+  return 0;
 }
 
 
@@ -141,11 +145,11 @@ int prkit_walk_reset(int procfd) {
 }
 
 
-int prkit_walk_read(int procfd, int *out_pids, int count) {
+int prkit_walk_read(int procfd, int *out_pids, size_t *out_count) {
   char buf[1024];
-  int read = 0;
+  size_t read = 0;
 
-  while (read < count) {
+  while (read < *out_count) {
     struct linux_dirent64 *dp = (struct linux_dirent64 *)buf;
     int r = getdents64(procfd, dp, sizeof(buf));
     if (r == -1) {
@@ -154,7 +158,7 @@ int prkit_walk_read(int procfd, int *out_pids, int count) {
       break;
     }
 
-    for (; read < count && ((void *)dp - (void *)buf) < r; dp = (void *)dp + dp->d_reclen) {
+    for (; read < *out_count && ((void *)dp - (void *)buf) < r; dp = (void *)dp + dp->d_reclen) {
       int isdir = 0;
 
       if (dp->d_type == DT_UNKNOWN) {
@@ -183,16 +187,20 @@ int prkit_walk_read(int procfd, int *out_pids, int count) {
     }
   }
 
-  return read;
+  if (out_count != NULL) {
+    *out_count = read;
+  }
+
+  return 0;
 }
 
 
-int prkit_walk_read_all(int procfd, int **out_pidsv) {
+int prkit_walk_read_all(int procfd, int **out_pidsv, size_t *out_count) {
   #define PIDS 32
 
   cleanup(freep) int *allocated = NULL;
 
-  int read = 0;
+  size_t read = 0;
 
   for (;;) {
     allocated = realloc(allocated, (read + PIDS + 1) * sizeof(int));
@@ -202,30 +210,34 @@ int prkit_walk_read_all(int procfd, int **out_pidsv) {
 
     int *pos = allocated + read;
 
-    int r = prkit_walk_read(procfd, pos, PIDS);
+    size_t count = PIDS;
+    int r = prkit_walk_read(procfd, pos, &count);
     if (r < 0) {
       *out_pidsv = NULL;
       return r;
-    } else if (r == 0) {
+    } else if (count == 0) {
       break;
     }
 
-    read += r;
+    read += count;
   }
 
   allocated[read] = 0;
   *out_pidsv = stealp(&allocated);
-  return read;
+  if (out_count != NULL) {
+    *out_count = read;
+  }
+  return 0;
 }
 
 
-ssize_t prkit_kernel_cmdline(int procfd, char **out_cmdline, size_t len) {
+int prkit_kernel_cmdline(int procfd, char **out_cmdline, size_t *out_len) {
   cleanup(closep) int fd = openat(procfd, "cmdline", O_RDONLY);
   if (fd == -1) {
     return -errno;
   }
 
-  return getline_noalloc(fd, out_cmdline, len);
+  return getline_noalloc(fd, out_cmdline, out_len);
 }
 
 
@@ -240,8 +252,9 @@ int prkit_kernel_stat(int procfd, struct prkit_kernel_stat *out_kstat) {
   char buf[4096];
   char *bufp = buf;
   for (;;) {
-    ssize_t b = getline_noalloc(fd, &bufp, sizeof(buf));
-    if (b <= 0) {
+    size_t b = sizeof(buf);
+    int r = getline_noalloc(fd, &bufp, &b);
+    if (r < 0 || b == 0) {
       return b;
     }
 
@@ -273,7 +286,7 @@ int prkit_kernel_stat(int procfd, struct prkit_kernel_stat *out_kstat) {
   return 0;
 }
 
-int prkit_pid_open(int procfd, int pid) {
+int prkit_pid_open(int procfd, int pid, int *out_pidfd) {
   char buf[16];
   snprintf(buf, sizeof(buf), "%d", pid);
 
@@ -282,7 +295,8 @@ int prkit_pid_open(int procfd, int pid) {
     return -errno;
   }
 
-  return fd;
+  *out_pidfd = fd;
+  return 0;
 }
 
 
@@ -326,29 +340,30 @@ static int flat_to_strv(char *line, char ***out, size_t len) {
 }
 
 
-static ssize_t read_line_flat(int pidfd, const char *path, char **out, size_t len) {
+static int read_line_flat(int pidfd, const char *path, char **out, size_t *out_len) {
   cleanup(closep) int fd = openat(pidfd, path, O_RDONLY);
   if (fd == -1) {
     return -errno;
   }
 
-  return getline_noalloc(fd, out, len);
+  return getline_noalloc(fd, out, out_len);
 }
 
 
 static int read_line_strv(int pidfd, const char *path, char ***out) {
   cleanup(freep) char *flat = NULL;
-  ssize_t r = read_line_flat(pidfd, path, &flat, 0);
+  size_t len;
+  ssize_t r = read_line_flat(pidfd, path, &flat, &len);
   if (r < 0) {
     return r;
   }
 
-  return flat_to_strv(flat, out, r);
+  return flat_to_strv(flat, out, len);
 }
 
 
-ssize_t prkit_pid_cmdline(int pidfd, char **out_cmdline, size_t len) {
-  return read_line_flat(pidfd, "cmdline", out_cmdline, len);
+int prkit_pid_cmdline(int pidfd, char **out_cmdline, size_t *out_len) {
+  return read_line_flat(pidfd, "cmdline", out_cmdline, out_len);
 }
 
 
@@ -357,8 +372,8 @@ int prkit_pid_cmdline_strv(int pidfd, char ***out_cmdline_strv) {
 }
 
 
-ssize_t prkit_pid_environ_flat(int pidfd, char **out_environ, size_t len) {
-  return read_line_flat(pidfd, "environ", out_environ, len);
+int prkit_pid_environ_flat(int pidfd, char **out_environ, size_t *out_len) {
+  return read_line_flat(pidfd, "environ", out_environ, out_len);
 }
 
 
@@ -367,15 +382,18 @@ int prkit_pid_environ_strv(int pidfd, char ***out_environ_strv) {
 }
 
 
-static size_t resolve(int pidfd, const char *path, char **out, size_t len) {
+static int resolve(int pidfd, const char *path, char **out, size_t *out_len) {
   cleanup(freep) char *allocated = NULL;
   char *target = *out;
+  size_t len = 0;
   if (target == NULL) {
     len = PATH_MAX + 1;
     target = allocated = malloc(len);
     if (allocated == NULL) {
       return -errno;
     }
+  } else {
+    len = *out_len;
   }
 
   ssize_t r = readlinkat(pidfd, path, target, len - 1);
@@ -386,19 +404,22 @@ static size_t resolve(int pidfd, const char *path, char **out, size_t len) {
   target[r] = 0;
   if (allocated != NULL) {
     *out = stealp(&allocated);
+    if (out_len != NULL) {
+      *out_len = r;
+    }
   }
 
   return r;
 }
 
 
-ssize_t prkit_pid_resolve_cwd(int pidfd, char **out_cwd, size_t len) {
-  return resolve(pidfd, "cwd", out_cwd, len);
+int prkit_pid_resolve_cwd(int pidfd, char **out_cwd, size_t *out_len) {
+  return resolve(pidfd, "cwd", out_cwd, out_len);
 }
 
 
-ssize_t prkit_pid_resolve_exe(int pidfd, char **out_exe, size_t len) {
-  return resolve(pidfd, "exe", out_exe, len);
+int prkit_pid_resolve_exe(int pidfd, char **out_exe, size_t *out_len) {
+  return resolve(pidfd, "exe", out_exe, out_len);
 }
 
 
@@ -409,10 +430,10 @@ static char *skipws(char *p) {
 
 
 int prkit_pid_stat_using_buf(int pidfd, struct prkit_pid_stat *out_pstat, char **out_buf,
-                             size_t len) {
+                             size_t *out_len) {
   cleanup(closep) int fd = openat(pidfd, "stat", O_RDONLY);
 
-  ssize_t r = getline_noalloc(fd, out_buf, len);
+  ssize_t r = getline_noalloc(fd, out_buf, out_len);
   if (r < 0) {
     return r;
   }
@@ -492,7 +513,7 @@ int prkit_pid_stat_using_buf(int pidfd, struct prkit_pid_stat *out_pstat, char *
 
 int prkit_pid_stat(int pidfd, struct prkit_pid_stat *out_pstat) {
   cleanup(freep) char *allocated = NULL;
-  return prkit_pid_stat_using_buf(pidfd, out_pstat, &allocated, 0);
+  return prkit_pid_stat_using_buf(pidfd, out_pstat, &allocated, NULL);
 }
 
 
@@ -502,7 +523,7 @@ prkit_ulong prkit_pid_actual_start_time(const struct prkit_kernel_stat *kstat,
 }
 
 
-int prkit_monitor_open() {
+int prkit_monitor_open(int *out_fd) {
   pid_t pid = getpid();
 
   cleanup(closep) int nlfd = socket(PF_NETLINK, SOCK_DGRAM, NETLINK_CONNECTOR);
@@ -537,7 +558,8 @@ int prkit_monitor_open() {
     return -errno;
   }
 
-  return steali(&nlfd);
+  *out_fd = steali(&nlfd);
+  return 0;
 }
 
 
@@ -549,11 +571,10 @@ int prkit_monitor_read_event(int nlfd, struct proc_event *out_event) {
     return -errno;
   }
 
-  if (hdr->nlmsg_type != NLMSG_DONE) {
-    return 0;
+  if (hdr->nlmsg_type == NLMSG_DONE) {
+    memcpy(out_event, (struct proc_event *)((struct cn_msg *)NLMSG_DATA(hdr))->data,
+           sizeof(*out_event));
   }
 
-  memcpy(out_event, (struct proc_event *)((struct cn_msg *)NLMSG_DATA(hdr))->data,
-         sizeof(*out_event));
-  return 1;
+  return 0;
 }

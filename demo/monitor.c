@@ -21,22 +21,26 @@
 int run() {
   int r;
 
-  cleanup(closep) int procfd = prkit_open();
-  if (procfd < 0) {
-    return print_error(procfd, "prkit_open");
+  cleanup(closep) int procfd = -1;
+  r = prkit_open(&procfd);
+  if (r < 0) {
+    return print_error(r, "prkit_open");
   }
 
-  cleanup(closep) int nlfd = prkit_monitor_open();
-  if (nlfd < 0) {
-    return print_error(nlfd, "prkit_monitor_open");
+  cleanup(closep) int nlfd = -1;
+  r = prkit_monitor_open(&nlfd);
+  if (r < 0) {
+    return print_error(r, "prkit_monitor_open");
   }
 
   struct proc_event event;
 
   for (;;) {
+    bzero(&event, sizeof(event));
+
     r = prkit_monitor_read_event(nlfd, &event);
     if (r < 0) {
-      return print_error(nlfd, "prkit_monitor_read_event");
+      return print_error(r, "prkit_monitor_read_event");
     }
 
     if (event.what & PROC_EVENT_FORK) {
@@ -50,9 +54,10 @@ int run() {
         int pid = pids[i];
         const char *desc = i == 0 ? "parent" : "child";
 
-        cleanup(closep) int pidfd = prkit_pid_open(procfd, pid);
-        if (pidfd < 0) {
-          print_error(pidfd, "prkit_pid_open(%s %d)", desc, pid);
+        cleanup(closep) int pidfd = -1;
+        r = prkit_pid_open(procfd, pid, &pidfd);
+        if (r < 0) {
+          print_error(r, "prkit_pid_open(%s %d)", desc, pid);
           continue;
         }
 
@@ -73,9 +78,10 @@ int run() {
     if (event.what & PROC_EVENT_EXEC) {
       int pid = event.event_data.exec.process_pid;
 
-      int pidfd = prkit_pid_open(procfd, pid);
-      if (pidfd < 0) {
-        print_error(pidfd, "prkit_pid_open(exec %d)", pid);
+      int pidfd = -1;
+      r = prkit_pid_open(procfd, pid, &pidfd);
+      if (r < 0) {
+        print_error(r, "prkit_pid_open(exec %d)", pid);
         continue;
       }
 
